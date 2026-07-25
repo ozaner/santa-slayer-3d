@@ -1,0 +1,19 @@
+{
+  "name": "santa-slayer-3d",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Santa Slayer 3D - a Quake-style arena shooter remake of the 2D original",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "vite": "^8.1.5"
+  }
+}

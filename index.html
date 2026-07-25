@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Santa Slayer 3D</title>
+<style>
+  :root {
+    --red: #e23b3b;
+    --red-dark: #8e0f1e;
+    --green: #33b06a;
+    --gold: #f0c05a;
+    --ice: #9ff2d6;
+    --cream: #fdfaf5;
+    --ink: #0a1020;
+    --panel: rgba(9, 14, 30, 0.82);
+    --stroke: rgba(159, 242, 214, 0.22);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #05070f;
+    color: var(--cream);
+    font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    cursor: default;
+  }
+
+  #app { position: fixed; inset: 0; }
+  canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  .layer { position: fixed; inset: 0; pointer-events: none; }
+  .layer.interactive { pointer-events: auto; }
+  .hidden { display: none !important; }
+
+  /* ------------------------------------------------------------ HUD */
+  #hud { opacity: 0; transition: opacity .25s; }
+  #hud.on { opacity: 1; }
+
+  .hud-corner {
+    position: absolute; bottom: 26px;
+    display: flex; align-items: flex-end; gap: 18px;
+    text-shadow: 0 2px 12px rgba(0,0,0,.85), 0 0 3px rgba(0,0,0,.9);
+  }
+  #hud-left { left: 34px; }
+  #hud-right { right: 34px; flex-direction: row-reverse; }
+
+  .stat { display: flex; align-items: center; gap: 10px; }
+  .stat .icon {
+    width: 34px; height: 34px; flex: 0 0 34px;
+    display: grid; place-items: center;
+    filter: drop-shadow(0 0 8px currentColor);
+  }
+  .stat .icon svg { width: 100%; height: 100%; }
+  .stat .num {
+    font-size: 52px; font-weight: 800; line-height: .85;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+  .stat .num small { font-size: 20px; opacity: .55; font-weight: 600; }
+  #health-stat { color: #ff6b76; }
+  #armor-stat { color: #6be09a; }
+  #ammo-stat { color: var(--ice); }
+
+  #health-stat.low .num { animation: pulse-red .55s infinite; }
+  @keyframes pulse-red { 0%,100% { color:#ff6b76 } 50% { color:#ff2233; text-shadow:0 0 22px #ff2233 } }
+
+  #weapon-name {
+    font-size: 13px; letter-spacing: .22em; font-weight: 700;
+    opacity: .8; margin-bottom: 6px; text-align: right;
+  }
+  #ammo-block { display: flex; flex-direction: column; align-items: flex-end; }
+
+  /* weapon carousel */
+  #weapon-list { display: flex; gap: 7px; margin-top: 10px; justify-content: flex-end; }
+  .wslot {
+    width: 30px; height: 26px; border-radius: 6px;
+    border: 1.5px solid rgba(255,255,255,.16);
+    background: rgba(0,0,0,.4);
+    display: grid; place-items: center;
+    font-size: 12px; font-weight: 800; color: rgba(255,255,255,.32);
+    transition: all .16s;
+  }
+  .wslot.have { color: rgba(255,255,255,.72); border-color: rgba(255,255,255,.32); }
+  .wslot.active {
+    color: var(--ink); background: var(--ice); border-color: var(--ice);
+    box-shadow: 0 0 16px rgba(159,242,214,.6);
+  }
+  .wslot.empty.have { color: #ff6b76; border-color: rgba(255,107,118,.4); }
+
+  /* speedometer */
+  #speedo {
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    text-align: center; font-variant-numeric: tabular-nums;
+    text-shadow: 0 2px 10px rgba(0,0,0,.9);
+  }
+  #speed-num { font-size: 26px; font-weight: 800; letter-spacing: -.01em; }
+  #speed-label { font-size: 10px; letter-spacing: .3em; opacity: .45; font-weight: 700; }
+  #speed-bar {
+    width: 190px; height: 3px; margin: 5px auto 0;
+    background: rgba(255,255,255,.14); border-radius: 3px; overflow: hidden;
+  }
+  #speed-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--ice), var(--gold) 60%, var(--red));
+    border-radius: 3px; transition: width .06s linear;
+  }
+  #bhop-chain {
+    font-size: 11px; letter-spacing: .18em; font-weight: 800; color: var(--gold);
+    opacity: 0; transition: opacity .2s; margin-top: 4px;
+  }
+  #bhop-chain.on { opacity: 1; }
+
+  /* crosshair */
+  #crosshair { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); }
+  #crosshair .bar {
+    position: absolute; background: rgba(255,255,255,.9);
+    box-shadow: 0 0 4px rgba(0,0,0,.9); border-radius: 1px;
+    transition: background .08s;
+  }
+  #crosshair .dot {
+    position: absolute; left: -1.5px; top: -1.5px; width: 3px; height: 3px;
+    background: rgba(255,255,255,.95); border-radius: 50%;
+    box-shadow: 0 0 4px rgba(0,0,0,.9);
+  }
+  #crosshair.hit .bar, #crosshair.hit .dot { background: #ff5c5c; }
+
+  #hitmarker {
+    position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+    transform: translate(-50%,-50%) scale(.7); opacity: 0;
+  }
+  #hitmarker.show { animation: hm .28s ease-out; }
+  @keyframes hm {
+    0% { opacity: 1; transform: translate(-50%,-50%) scale(.55) }
+    100% { opacity: 0; transform: translate(-50%,-50%) scale(1.25) }
+  }
+  #hitmarker span {
+    position: absolute; width: 9px; height: 2px; background: #fff;
+    box-shadow: 0 0 6px rgba(0,0,0,.8);
+  }
+
+  /* top bar */
+  #topbar {
+    position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+    text-align: center; text-shadow: 0 2px 12px rgba(0,0,0,.9);
+  }
+  #wave-label { font-size: 12px; letter-spacing: .36em; opacity: .6; font-weight: 700; }
+  #wave-info { font-size: 30px; font-weight: 800; margin-top: 2px; letter-spacing: .02em; }
+  #wave-sub { font-size: 13px; opacity: .68; margin-top: 3px; letter-spacing: .08em; }
+
+  #score-box {
+    position: absolute; top: 24px; right: 34px; text-align: right;
+    text-shadow: 0 2px 12px rgba(0,0,0,.9);
+  }
+  #score-num { font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--gold); }
+  #score-label { font-size: 10px; letter-spacing: .3em; opacity: .5; font-weight: 700; }
+  #combo {
+    font-size: 15px; font-weight: 800; color: var(--red);
+    opacity: 0; transition: opacity .2s; margin-top: 4px;
+  }
+  #combo.on { opacity: 1; }
+
+  #level-name {
+    position: absolute; top: 24px; left: 34px;
+    font-size: 12px; letter-spacing: .28em; opacity: .5; font-weight: 700;
+    text-shadow: 0 2px 12px rgba(0,0,0,.9);
+  }
+
+  /* boss bar */
+  #bossbar {
+    position: absolute; top: 96px; left: 50%; transform: translateX(-50%);
+    width: min(620px, 62vw); opacity: 0; transition: opacity .4s;
+  }
+  #bossbar.on { opacity: 1; }
+  #boss-name {
+    font-size: 13px; letter-spacing: .3em; font-weight: 800; text-align: center;
+    margin-bottom: 6px; color: #ffb14a; text-shadow: 0 0 18px rgba(255,120,40,.7);
+  }
+  #boss-track {
+    height: 13px; background: rgba(0,0,0,.62); border: 1.5px solid rgba(255,177,74,.45);
+    border-radius: 8px; overflow: hidden;
+  }
+  #boss-fill {
+    height: 100%; width: 100%;
+    background: linear-gradient(90deg, #ff4a2a, #ffb14a);
+    transition: width .22s;
+  }
+
+  /* toasts + messages */
+  #toasts {
+    position: absolute; left: 34px; bottom: 150px;
+    display: flex; flex-direction: column-reverse; gap: 6px;
+  }
+  .toast {
+    font-size: 14px; font-weight: 600; letter-spacing: .04em;
+    padding: 5px 12px; border-radius: 6px;
+    background: rgba(6,10,22,.72); border-left: 3px solid var(--gold);
+    text-shadow: 0 1px 6px rgba(0,0,0,.9);
+    animation: toast-in .22s ease-out;
+  }
+  @keyframes toast-in { from { opacity:0; transform:translateX(-14px) } to { opacity:1; transform:none } }
+
+  #center-msg {
+    position: absolute; left: 50%; top: 38%; transform: translate(-50%,-50%);
+    text-align: center; pointer-events: none;
+  }
+  #center-msg .big {
+    font-size: 62px; font-weight: 900; letter-spacing: .04em;
+    text-shadow: 0 6px 40px rgba(0,0,0,.9), 0 0 30px currentColor;
+  }
+  #center-msg .small { font-size: 17px; letter-spacing: .2em; opacity: .82; margin-top: 6px; font-weight: 600; }
+  #center-msg.pop { animation: pop .5s ease-out; }
+  @keyframes pop { 0% { opacity:0; transform:translate(-50%,-50%) scale(.85) } 100% { opacity:1; transform:translate(-50%,-50%) scale(1) } }
+
+  /* powerup */
+  #powerups { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); display: flex; gap: 12px; }
+  .pw {
+    font-size: 13px; font-weight: 800; letter-spacing: .16em;
+    padding: 6px 14px; border-radius: 20px;
+    background: rgba(6,10,22,.72); border: 1.5px solid currentColor;
+    box-shadow: 0 0 22px -4px currentColor;
+  }
+
+  /* damage direction */
+  .dmg-arrow {
+    position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+    transform-origin: 0 0;
+  }
+  .dmg-arrow i {
+    position: absolute; left: -14px; top: -132px;
+    width: 28px; height: 34px;
+    background: linear-gradient(to top, rgba(255,40,40,0), rgba(255,60,60,.85));
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  /* ------------------------------------------------------------ menus */
+  .screen {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 40%, rgba(20,32,66,.62), rgba(3,5,12,.93));
+    backdrop-filter: blur(3px);
+  }
+  .panel {
+    width: min(760px, 92vw);
+    padding: 40px 46px;
+    text-align: center;
+  }
+  .title {
+    font-size: clamp(46px, 8.5vw, 104px);
+    font-weight: 900; line-height: .92; letter-spacing: -.015em;
+    background: linear-gradient(178deg, #fff 8%, var(--gold) 46%, var(--red) 96%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 6px 26px rgba(226,59,59,.42));
+    margin: 0;
+  }
+  .title .three {
+    display: block; font-size: .3em; letter-spacing: .58em; margin-top: 10px;
+    background: none; color: var(--ice); -webkit-text-fill-color: var(--ice);
+    filter: drop-shadow(0 0 16px rgba(159,242,214,.5));
+  }
+  .tagline { margin: 18px 0 0; font-size: 15px; letter-spacing: .16em; opacity: .62; }
+
+  .btn {
+    display: block; width: 100%; margin: 10px 0;
+    padding: 15px 24px;
+    font-size: 17px; font-weight: 800; letter-spacing: .14em;
+    color: var(--cream); background: rgba(255,255,255,.05);
+    border: 1.5px solid rgba(255,255,255,.16); border-radius: 10px;
+    cursor: pointer; transition: all .14s;
+    font-family: inherit;
+  }
+  .btn:hover, .btn:focus-visible {
+    background: rgba(226,59,59,.2); border-color: var(--red);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 26px -10px rgba(226,59,59,.8);
+    outline: none;
+  }
+  .btn.primary {
+    background: linear-gradient(180deg, var(--red), var(--red-dark));
+    border-color: rgba(255,255,255,.28);
+    box-shadow: 0 10px 30px -12px rgba(226,59,59,.95);
+  }
+  .btn.primary:hover { filter: brightness(1.12); }
+  .btn.small { font-size: 13px; padding: 10px 18px; letter-spacing: .1em; }
+
+  .btnrow { display: flex; gap: 12px; margin-top: 12px; }
+  .btnrow .btn { margin: 0; }
+
+  .controls {
+    margin-top: 28px; display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px 26px; font-size: 13px; opacity: .78; text-align: left;
+  }
+  .controls div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+  .controls kbd {
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2);
+    border-bottom-width: 2px; border-radius: 4px; padding: 1px 7px;
+    font-family: inherit; font-size: 11px; font-weight: 700; white-space: nowrap;
+  }
+  .hint { margin-top: 22px; font-size: 12px; letter-spacing: .1em; opacity: .45; }
+
+  .stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 18px; margin: 26px 0;
+  }
+  .stats-grid .cell { text-align: center; }
+  .stats-grid .v { font-size: 36px; font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
+  .stats-grid .k { font-size: 11px; letter-spacing: .22em; opacity: .55; font-weight: 700; margin-top: 2px; }
+
+  .setting {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 18px; padding: 11px 4px; border-bottom: 1px solid rgba(255,255,255,.08);
+    font-size: 14px;
+  }
+  .setting label { letter-spacing: .08em; opacity: .85; }
+  .setting input[type=range] { width: 190px; accent-color: var(--red); }
+  .setting .seg { display: flex; gap: 6px; }
+  .setting .seg button {
+    padding: 6px 14px; font-size: 12px; font-weight: 700; letter-spacing: .08em;
+    background: rgba(255,255,255,.05); color: var(--cream);
+    border: 1px solid rgba(255,255,255,.16); border-radius: 6px; cursor: pointer;
+    font-family: inherit;
+  }
+  .setting .seg button.on { background: var(--red); border-color: var(--red); }
+  .setting .val { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; opacity: .7; font-size: 13px; }
+
+  #menu-santa {
+    position: fixed; inset: 0; z-index: -1;
+  }
+
+  #loading {
+    position: fixed; inset: 0; display: grid; place-items: center;
+    background: #05070f; z-index: 50;
+  }
+  #loading .l-inner { text-align: center; }
+  #loading .l-bar {
+    width: 260px; height: 3px; background: rgba(255,255,255,.12);
+    border-radius: 3px; overflow: hidden; margin: 20px auto 0;
+  }
+  #loading .l-fill {
+    height: 100%; width: 0%; background: linear-gradient(90deg, var(--red), var(--gold));
+    transition: width .2s;
+  }
+  #loading .l-text { font-size: 12px; letter-spacing: .28em; opacity: .55; font-weight: 700; }
+
+  .fade-black {
+    position: fixed; inset: 0; background: #000; opacity: 0;
+    transition: opacity .4s; pointer-events: none; z-index: 40;
+  }
+  .fade-black.on { opacity: 1; }
+
+  #dmg-overlay {
+    position: fixed; inset: 0; pointer-events: none;
+    box-shadow: inset 0 0 160px 40px rgba(200,20,25,0);
+    transition: box-shadow .18s;
+  }
+
+  @media (max-width: 720px) {
+    .hud-corner .num { font-size: 38px; }
+    #hud-left { left: 18px; } #hud-right { right: 18px; }
+    .panel { padding: 26px 20px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <div id="dmg-overlay"></div>
+
+  <!-- ============================= HUD ============================= -->
+  <div id="hud" class="layer">
+    <div id="level-name">THE NORTH POLE</div>
+
+    <div id="topbar">
+      <div id="wave-label">WAVE</div>
+      <div id="wave-info">1 / 5</div>
+      <div id="wave-sub">Gingerbread remaining: 0</div>
+    </div>
+
+    <div id="score-box">
+      <div id="score-num">0</div>
+      <div id="score-label">SCORE</div>
+      <div id="combo">x1</div>
+    </div>
+
+    <div id="bossbar">
+      <div id="boss-name">THE GINGERBREAD GOLEM</div>
+      <div id="boss-track"><div id="boss-fill"></div></div>
+    </div>
+
+    <div id="crosshair">
+      <div class="dot"></div>
+      <div class="bar" id="ch-t"></div>
+      <div class="bar" id="ch-b"></div>
+      <div class="bar" id="ch-l"></div>
+      <div class="bar" id="ch-r"></div>
+    </div>
+    <div id="hitmarker">
+      <span style="left:0;top:4px;transform:rotate(45deg)"></span>
+      <span style="right:0;top:4px;transform:rotate(-45deg)"></span>
+      <span style="left:0;bottom:4px;transform:rotate(-45deg)"></span>
+      <span style="right:0;bottom:4px;transform:rotate(45deg)"></span>
+    </div>
+
+    <div id="dmg-arrows"></div>
+    <div id="powerups"></div>
+
+    <div id="speedo">
+      <div id="speed-num">0</div>
+      <div id="speed-label">UPS</div>
+      <div id="speed-bar"><div id="speed-fill"></div></div>
+      <div id="bhop-chain">CHAIN x0</div>
+    </div>
+
+    <div id="toasts"></div>
+
+    <div id="hud-left" class="hud-corner">
+      <div class="stat" id="health-stat">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-8-5.1-8-10.4A4.6 4.6 0 0 1 12 7a4.6 4.6 0 0 1 8 3.6C20 15.9 12 21 12 21z"/></svg>
+        </div>
+        <div class="num" id="health-num">100</div>
+      </div>
+      <div class="stat" id="armor-stat">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 4 5v6.2c0 5 3.4 9.3 8 10.8 4.6-1.5 8-5.8 8-10.8V5l-8-3z"/></svg>
+        </div>
+        <div class="num" id="armor-num">0</div>
+      </div>
+    </div>
+
+    <div id="hud-right" class="hud-corner">
+      <div id="ammo-block">
+        <div id="weapon-name">BLIZZARD CANNON</div>
+        <div class="stat" id="ammo-stat">
+          <div class="num" id="ammo-num">60</div>
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+          </div>
+        </div>
+        <div id="weapon-list"></div>
+      </div>
+    </div>
+
+    <div id="center-msg"></div>
+  </div>
+
+  <!-- ============================ screens ========================== -->
+  <div id="menu" class="screen layer interactive hidden">
+    <div class="panel">
+      <h1 class="title">SANTA SLAYER<span class="three">THREE DIMENSIONS</span></h1>
+      <p class="tagline">THE GINGERBREAD UPRISING HAS BEGUN</p>
+      <div style="max-width:340px;margin:34px auto 0">
+        <button class="btn primary" id="btn-play">START THE SLAUGHTER</button>
+        <div class="btnrow">
+          <button class="btn small" id="btn-levels">SELECT LEVEL</button>
+          <button class="btn small" id="btn-settings">SETTINGS</button>
+        </div>
+      </div>
+      <div class="controls">
+        <div><span>Move</span><kbd>W A S D</kbd></div>
+        <div><span>Jump / bunny hop</span><kbd>SPACE</kbd></div>
+        <div><span>Crouch</span><kbd>CTRL</kbd></div>
+        <div><span>Fire</span><kbd>MOUSE 1</kbd></div>
+        <div><span>Weapons</span><kbd>1 – 4 / WHEEL</kbd></div>
+        <div><span>Pause</span><kbd>ESC</kbd></div>
+      </div>
+      <p class="hint">Hold <kbd>SPACE</kbd> and strafe with the mouse to build speed. Rocket-jump with the Present Launcher.</p>
+    </div>
+  </div>
+
+  <div id="levels" class="screen layer interactive hidden">
+    <div class="panel">
+      <h2 class="title" style="font-size:clamp(30px,5vw,56px)">SELECT LEVEL</h2>
+      <div id="level-list" style="max-width:420px;margin:32px auto 0"></div>
+      <button class="btn small" id="btn-levels-back" style="max-width:200px;margin:26px auto 0">BACK</button>
+    </div>
+  </div>
+
+  <div id="settings" class="screen layer interactive hidden">
+    <div class="panel" style="max-width:560px">
+      <h2 class="title" style="font-size:clamp(30px,5vw,56px)">SETTINGS</h2>
+      <div style="margin-top:28px;text-align:left">
+        <div class="setting">
+          <label>Mouse sensitivity</label>
+          <input type="range" id="set-sens" min="0.3" max="6" step="0.1" value="2" />
+          <span class="val" id="val-sens">2.0</span>
+        </div>
+        <div class="setting">
+          <label>Field of view</label>
+          <input type="range" id="set-fov" min="70" max="120" step="1" value="95" />
+          <span class="val" id="val-fov">95</span>
+        </div>
+        <div class="setting">
+          <label>Master volume</label>
+          <input type="range" id="set-vol" min="0" max="1" step="0.05" value="0.7" />
+          <span class="val" id="val-vol">70%</span>
+        </div>
+        <div class="setting">
+          <label>Music volume</label>
+          <input type="range" id="set-music" min="0" max="1" step="0.05" value="0.4" />
+          <span class="val" id="val-music">40%</span>
+        </div>
+        <div class="setting">
+          <label>Quality</label>
+          <div class="seg" id="set-quality">
+            <button data-q="low">LOW</button>
+            <button data-q="medium">MED</button>
+            <button data-q="high" class="on">HIGH</button>
+          </div>
+        </div>
+        <div class="setting">
+          <label>View bob</label>
+          <div class="seg" id="set-bob">
+            <button data-b="0">OFF</button>
+            <button data-b="1" class="on">ON</button>
+          </div>
+        </div>
+      </div>
+      <button class="btn small" id="btn-settings-back" style="max-width:200px;margin:26px auto 0">BACK</button>
+    </div>
+  </div>
+
+  <div id="pause" class="screen layer interactive hidden">
+    <div class="panel" style="max-width:420px">
+      <h2 class="title" style="font-size:clamp(30px,5vw,56px)">PAUSED</h2>
+      <div style="margin-top:32px">
+        <button class="btn primary" id="btn-resume">RESUME</button>
+        <button class="btn small" id="btn-pause-settings">SETTINGS</button>
+        <button class="btn small" id="btn-restart">RESTART LEVEL</button>
+        <button class="btn small" id="btn-quit">QUIT TO MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameover" class="screen layer interactive hidden">
+    <div class="panel" style="max-width:520px">
+      <h2 class="title" style="font-size:clamp(38px,6vw,72px);background:linear-gradient(178deg,#fff,#e23b3b);-webkit-background-clip:text;background-clip:text">
+        SANTA IS DOWN
+      </h2>
+      <p class="tagline" id="death-cause">The gingerbread got you.</p>
+      <div class="stats-grid" id="death-stats"></div>
+      <button class="btn primary" id="btn-retry">TRY AGAIN</button>
+      <button class="btn small" id="btn-death-quit">QUIT TO MENU</button>
+    </div>
+  </div>
+
+  <div id="victory" class="screen layer interactive hidden">
+    <div class="panel" style="max-width:560px">
+      <h2 class="title" id="victory-title" style="font-size:clamp(38px,6vw,72px)">LEVEL CLEAR</h2>
+      <p class="tagline" id="victory-sub">The village is safe. For now.</p>
+      <div class="stats-grid" id="victory-stats"></div>
+      <button class="btn primary" id="btn-next">NEXT LEVEL</button>
+      <button class="btn small" id="btn-victory-quit">QUIT TO MENU</button>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div class="l-inner">
+      <div class="l-text" id="loading-text">BAKING GINGERBREAD…</div>
+      <div class="l-bar"><div class="l-fill" id="loading-fill"></div></div>
+    </div>
+  </div>
+
+  <div id="fade" class="fade-black"></div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
