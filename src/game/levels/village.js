@@ -74,6 +74,9 @@ export function buildVillage(scene) {
     B.clip(h.x, size.h + rise * 0.72, h.z, ex * 0.55, rise * 0.45, ez * 0.55);
     h.roofY = roofY;
     h.ex = ex; h.ez = ez;
+    // The height you actually stand at on this roof, from the top collision
+    // step -- what the jump pads need to aim for.
+    h.standY = size.h + rise * 0.945;
   }
 
   // Rooftop bridges: candy-striped planks between neighbouring houses.
@@ -118,17 +121,27 @@ export function buildVillage(scene) {
   B.prop(buildCrate({ s: 1.6, seed: 21 }), 10.5, 1.6, 13.5, 0.5);
   B.clip(10.5, 2.4, 13.5, 1.7, 1.6, 1.7);
 
-  /* ---------------- jump pads ---------------- */
+  /* ---------------- jump pads ----------------
+   * Each one names where it is supposed to put you and the arc is solved from
+   * that, so every walkway and every rooftop is reachable from the ground.
+   */
+  const BRIDGE_Y = BY + 0.25; // deck surface
   const padSpots = [
-    { x: -14, z: -14, push: 15.5 },
-    { x: 14, z: 14, push: 15.5 },
-    { x: -20, z: 26, push: 14 },
-    { x: 20, z: -20, push: 14 },
-    { x: -32, z: 12, push: 17 }, // out of the pond
+    // Onto the four rooftop bridges.
+    { x: -13, z: -15, target: [-13, BRIDGE_Y, -26] },
+    { x: 13, z: 15, target: [13, BRIDGE_Y, 26] },
+    { x: -15, z: 13, target: [-26, BRIDGE_Y, 13] },
+    { x: 13, z: -15, target: [26, BRIDGE_Y, -15] },
+    // Out of the frozen pond and up onto the west bridge.
+    { x: -32, z: 12, target: [-26, BRIDGE_Y, 6] },
+    // Onto two of the house roofs, the highest ground in the level.
+    { x: -34, z: -14, target: [HOUSES[0].x, HOUSES[0].standY, HOUSES[0].z] },
+    { x: 34, z: 14, target: [HOUSES[3].x, HOUSES[3].standY, HOUSES[3].z] },
   ];
   for (const p of padSpots) {
-    const pad = buildJumpPad({ r: 1.35 });
-    B.jumpPad(p.x, 0.05, p.z, { push: p.push, model: pad, radius: 1.7 });
+    B.jumpPad(p.x, 0.05, p.z, {
+      target: p.target, model: buildJumpPad({ r: 1.35 }), radius: 1.8, clearance: 1.6,
+    });
   }
 
   /* ---------------- decoration ---------------- */

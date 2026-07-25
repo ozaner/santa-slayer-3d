@@ -8,6 +8,7 @@
  */
 import * as THREE from 'three';
 import { World, SURFACE, v3, traceBox, makeTrace } from '../core/physics.js';
+import { PM } from '../core/pmove.js';
 import {
   MAT, PALETTE, glowMat, emissiveMat, stdMat, mesh, shadowize,
 } from '../render/materials.js';
@@ -189,14 +190,40 @@ export class LevelBuilder {
     this.pickups.push({ kind, x, y, z });
   }
 
-  /** Candy-cane launcher: a trigger volume that flings the player upward. */
-  jumpPad(x, y, z, { push = 15, forward = null, model = null, radius = 1.3 } = {}) {
-    this.jumpPads.push({
-      pos: new THREE.Vector3(x, y, z), push, forward, radius,
-    });
+  /**
+   * Candy-cane launcher.
+   *
+   * Prefer `target: [x, y, z]` over a raw `push`: the launch arc is then solved
+   * so the player actually lands there with `clearance` metres to spare. Hand-
+   * tuned pushes are how the first version ended up flinging players to 5.5m at
+   * bridges whose decks were at 5.85m -- close enough to look like the pad was
+   * simply broken.
+   */
+  jumpPad(x, y, z, { push = 15, target = null, forward = null, model = null, radius = 1.3, clearance = 1.4 } = {}) {
+    let vy = push;
+    let fwd = forward;
+
+    if (target) {
+      const [tx, ty, tz] = target;
+      const apex = Math.max(ty + clearance, y + 1.5);
+      vy = Math.sqrt(2 * PM.gravity * (apex - y));
+      const tUp = vy / PM.gravity;
+      const tDown = Math.sqrt(Math.max(0, 2 * (apex - ty)) / PM.gravity);
+      const flight = tUp + tDown;
+      const dx = tx - x;
+      const dz = tz - z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.01 && flight > 0.01) {
+        const speed = dist / flight;
+        fwd = { x: (dx / dist) * speed, z: (dz / dist) * speed };
+      }
+    }
+
+    const pad = { pos: new THREE.Vector3(x, y, z), push: vy, forward: fwd, radius, target };
+    this.jumpPads.push(pad);
     this.route(x, y, z);
     if (model) this.prop(model, x, y, z);
-    return this.jumpPads[this.jumpPads.length - 1];
+    return pad;
   }
 
   /** The level-exit flagpole, a nod to the original game's end-of-level pole. */
@@ -252,6 +279,13 @@ export class LevelBuilder {
     }
     for (const p of this.pickups) {
       if (stuck(p.x, p.y, p.z, 0.35, 0.9)) bad.push(`pickup ${p.kind} (${p.x}, ${p.y}, ${p.z})`);
+    }
+    // A pad buried in geometry silently does nothing, which reads to a player
+    // as "the jump pads are broken".
+    for (const j of this.jumpPads) {
+      if (stuck(j.pos.x, j.pos.y, j.pos.z, 0.38, 1.82)) {
+        bad.push(`jump pad (${j.pos.x}, ${j.pos.y}, ${j.pos.z})`);
+      }
     }
     this.problems = bad;
     if (bad.length && !globalThis.__SS_LEVEL_AUDIT__) {

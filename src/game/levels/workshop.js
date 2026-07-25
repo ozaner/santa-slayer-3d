@@ -48,12 +48,39 @@ export function buildWorkshop(scene) {
     [0, -24, 62, 5], [0, 24, 62, 5],
     [-29, 0, 5, 43], [29, 0, 5, 43],
   ];
+  // Jump pads land on the long runs, so their inner railings are notched --
+  // without the gaps an arriving player clips the rail mid-arc and drops.
+  const PAD_LANDINGS = [-20, 0, 20];
+  const GAP = 5;
+  const railSegments = (centre, length, gaps) => {
+    const half = length / 2;
+    const edges = [];
+    for (const gp of gaps.slice().sort((a, b) => a - b)) {
+      if (gp - GAP / 2 > centre - half && gp + GAP / 2 < centre + half) {
+        edges.push([gp - GAP / 2, gp + GAP / 2]);
+      }
+    }
+    const out = [];
+    let cursor = centre - half;
+    for (const [a, b] of edges) {
+      if (a > cursor) out.push([(cursor + a) / 2, a - cursor]);
+      cursor = b;
+    }
+    if (centre + half > cursor) out.push([(cursor + centre + half) / 2, centre + half - cursor]);
+    return out;
+  };
+
   for (const [x, z, sx, sz] of ring) {
     B.box(x, CY, z, sx, 0.5, sz, { material: catMat, uvScale: 2.5 });
-    // Railings
     if (sx > sz) {
-      B.box(x, CY + 0.75, z - sz / 2 + 0.12, sx, 1, 0.16, { material: steel, uvScale: 2 });
-      B.box(x, CY + 0.75, z + sz / 2 - 0.12, sx, 1, 0.16, { material: steel, uvScale: 2 });
+      const inner = z < 0 ? z + sz / 2 - 0.12 : z - sz / 2 + 0.12; // faces the room
+      const outer = z < 0 ? z - sz / 2 + 0.12 : z + sz / 2 - 0.12;
+      // Both rails are notched: pads approach the long runs from inside the
+      // room and from the wall side, so either rail can catch an incoming arc.
+      for (const [cx, len] of railSegments(x, sx, PAD_LANDINGS)) {
+        B.box(cx, CY + 0.75, inner, len, 1, 0.16, { material: steel, uvScale: 2 });
+        B.box(cx, CY + 0.75, outer, len, 1, 0.16, { material: steel, uvScale: 2 });
+      }
     } else {
       B.box(x - sx / 2 + 0.12, CY + 0.75, z, 0.16, 1, sz, { material: steel, uvScale: 2 });
       B.box(x + sx / 2 - 0.12, CY + 0.75, z, 0.16, 1, sz, { material: steel, uvScale: 2 });
@@ -101,8 +128,19 @@ export function buildWorkshop(scene) {
   });
 
   /* ---------------- jump pads ---------------- */
-  for (const [x, z, push] of [[-20, 20, 15], [20, -20, 15], [0, -30, 14.5], [0, 30, 14.5]]) {
-    B.jumpPad(x, 0.05, z, { push, model: buildJumpPad({ r: 1.3 }), radius: 1.7 });
+  // Each aims at the catwalk ring so the upper floor is always reachable.
+  const CATWALK_Y = CY + 0.25;
+  for (const [x, z, tx, tz] of [
+    // Kept well back from the deck: a pad parked right against the catwalk's
+    // outer lip launches into the edge of it however steep the arc.
+    [-20, 20, -20, 24], [20, -20, 20, -24], [0, -29, 0, -24], [0, 29, 0, 24],
+  ]) {
+    // Generous clearance: these pads sit only a few metres out from the
+    // catwalk, so a shallow arc clips the deck's edge on the way up. A high,
+    // slow arc arrives well above the lip.
+    B.jumpPad(x, 0.05, z, {
+      target: [tx, CATWALK_Y, tz], model: buildJumpPad({ r: 1.3 }), radius: 1.8, clearance: 4,
+    });
   }
 
   /* ---------------- decor ---------------- */

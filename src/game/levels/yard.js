@@ -79,8 +79,14 @@ export function buildYard(scene) {
   });
 
   /* ---------------- jump pads: the escape valves ---------------- */
-  for (const [x, z, push] of [[-19, 0, 16], [19, 0, 16], [0, -19, 16], [0, 19, 16]]) {
-    B.jumpPad(x, 0.05, z, { push, model: buildJumpPad({ r: 1.4 }), radius: 1.8 });
+  // Escape valves off the rink and onto the raised ring.
+  // Offset from the x = 0 and z = 0 axes so they miss the four ramp staircases.
+  for (const [x, z, tx, tz] of [
+    [-19, 8, -30, 8], [19, -8, 30, -8], [-9, -19, -9, -30], [9, 19, 9, 30],
+  ]) {
+    B.jumpPad(x, 0.2, z, {
+      target: [tx, RY + 0.1, tz], model: buildJumpPad({ r: 1.4 }), radius: 1.9, clearance: 1.8,
+    });
   }
 
   /* ---------------- flagpole ---------------- */

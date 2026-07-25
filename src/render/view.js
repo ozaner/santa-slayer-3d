@@ -13,6 +13,14 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
+/**
+ * Total point lights allocated for the session. Fixed forever -- see the note
+ * in the constructor. Split into level lights and effect lights.
+ */
+export const LEVEL_LIGHT_SLOTS = 14;
+export const FX_LIGHT_SLOTS = 6;
+const POINT_LIGHT_POOL = LEVEL_LIGHT_SLOTS + FX_LIGHT_SLOTS;
+
 /** Damage vignette + chromatic wobble, applied right before output. */
 const ScreenFX = {
   uniforms: {
@@ -150,9 +158,24 @@ export class View {
 
     this.composer.addPass(new OutputPass());
 
-    /* --- managed point-light pool --- */
+    /* --- managed point-light pool ---
+     *
+     * CRITICAL: the number of *visible* point lights must never change while
+     * the game is running. three.js bakes the light counts into every
+     * material's program cache key, so a single light appearing or vanishing
+     * recompiles every shader in the scene -- measured at 376ms for an
+     * explosion and nearly 8 seconds for a rocket. So the pool is allocated
+     * once, every light stays visible forever, and "off" means intensity 0.
+     */
     this.lightPool = [];
-    this.maxLights = 24;
+    for (let i = 0; i < POINT_LIGHT_POOL; i++) {
+      const l = new THREE.PointLight(0xffbb66, 0, 12, 2);
+      l.visible = true;
+      l.castShadow = false;
+      this.scene.add(l);
+      this.lightPool.push(l);
+    }
+    this.maxLights = LEVEL_LIGHT_SLOTS;
 
     this.resize();
     addEventListener('resize', () => this.resize());
@@ -171,19 +194,20 @@ export class View {
       this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1));
       this.renderer.shadowMap.enabled = false;
       this.bloom.strength = 0.34;
-      this.maxLights = 8;
+      // Only how many slots are *lit* changes -- never how many exist.
+      this.levelLightBudget = 5;
     } else if (level === 'medium') {
       this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.25));
       this.renderer.shadowMap.enabled = true;
       this.moon.shadow.mapSize.set(1024, 1024);
       this.bloom.strength = 0.38;
-      this.maxLights = 14;
+      this.levelLightBudget = 9;
     } else {
       this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
       this.renderer.shadowMap.enabled = true;
       this.moon.shadow.mapSize.set(2048, 2048);
       this.bloom.strength = 0.42;
-      this.maxLights = 24;
+      this.levelLightBudget = LEVEL_LIGHT_SLOTS;
     }
     if (this.moon.shadow.map) {
       this.moon.shadow.map.dispose();
@@ -193,30 +217,45 @@ export class View {
   }
 
   /**
-   * Give a level's light anchors real THREE.PointLights, nearest-first, up to
-   * the budget. Anchors beyond the budget still render their emissive meshes.
+   * Point the level's light slots at the nearest light anchors. Anchors beyond
+   * the budget still render their emissive meshes, they just cast no light.
+   *
+   * Lights are repositioned, never created or destroyed -- see the pool note.
    */
   assignLights(anchors, focus = new THREE.Vector3()) {
-    for (const l of this.lightPool) l.parent?.remove(l);
-    this.lightPool.length = 0;
-    const sorted = anchors.slice().sort((a, b) => {
-      const pa = new THREE.Vector3(); a.getWorldPosition(pa);
-      const pb = new THREE.Vector3(); b.getWorldPosition(pb);
-      return pa.distanceToSquared(focus) - pb.distanceToSquared(focus);
+    const withPos = anchors.map((a) => {
+      const p = new THREE.Vector3();
+      a.getWorldPosition(p);
+      return { a, p, d: p.distanceToSquared(focus) };
     });
-    for (let i = 0; i < Math.min(sorted.length, this.maxLights); i++) {
-      const a = sorted[i];
-      const cfg = a.userData.light || {};
-      const light = new THREE.PointLight(
-        cfg.color ?? 0xffbb66,
-        cfg.intensity ?? 2,
-        cfg.distance ?? 12,
-        cfg.decay ?? 2,
-      );
-      light.castShadow = false;
-      a.add(light);
-      this.lightPool.push(light);
+    withPos.sort((x, y) => x.d - y.d);
+
+    const budget = Math.min(this.levelLightBudget ?? LEVEL_LIGHT_SLOTS, LEVEL_LIGHT_SLOTS);
+    for (let i = 0; i < LEVEL_LIGHT_SLOTS; i++) {
+      const light = this.lightPool[i];
+      const entry = i < budget ? withPos[i] : null;
+      if (!entry) { light.intensity = 0; continue; }
+      const cfg = entry.a.userData.light || {};
+      light.position.copy(entry.p);
+      light.color.set(cfg.color ?? 0xffbb66);
+      light.intensity = cfg.intensity ?? 2;
+      light.distance = cfg.distance ?? 12;
+      light.decay = cfg.decay ?? 2;
     }
+  }
+
+  /** The slice of the pool the effects system may borrow. */
+  get fxLights() {
+    return this.lightPool.slice(LEVEL_LIGHT_SLOTS);
+  }
+
+  /**
+   * Compile every shader the scene currently needs, so the first explosion of
+   * a level does not stall. Called once after a level is built.
+   */
+  warmup() {
+    this.renderer.compile(this.scene, this.camera);
+    this.renderer.compile(this.viewScene, this.viewCamera);
   }
 
   /**

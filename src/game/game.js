@@ -120,6 +120,66 @@ export class Game {
 
   get levelCount() { return LEVELS.length; }
 
+  /**
+   * Build everything that would otherwise be built lazily mid-fight. Enemy
+   * prototypes paint canvas textures and merge geometry; the rocket clones a
+   * model. Doing that on the first shield gingerbread of wave three is a
+   * visible hitch, so it happens on the loading screen instead.
+   */
+  prewarm() {
+    for (const type of Object.keys(ENEMY_TYPES)) this.enemies._proto(type);
+    this.projectiles._presentMesh();
+    this._santaProto();
+  }
+
+  /**
+   * Force every shader the level needs to compile now. Called once per level
+   * load, with one of each enemy parked in front of the camera so their
+   * materials are compiled too.
+   */
+  warmupShaders() {
+    // Go through the real spawn and fire paths and then draw an actual composed
+    // frame with the results in shot. renderer.compile() alone misses the
+    // shadow-depth variants, which is what made the first rocket of a session
+    // stall for over a tenth of a second. Runs behind the loading screen.
+    const cam = this.view.camera;
+    cam.position.set(this.player.pos.x, this.player.pos.y + PM.eyeHeight, this.player.pos.z);
+    cam.rotation.set(0, this.player.yaw, 0, 'YXZ');
+    cam.updateMatrixWorld(true);
+    cam.getWorldDirection(_fwd);
+
+    _tmp.copy(cam.position).addScaledVector(_fwd, 7);
+    const spot = { x: _tmp.x, y: Math.max(_tmp.y - 1.6, this.player.pos.y), z: _tmp.z };
+
+    let i = 0;
+    for (const type of Object.keys(ENEMY_TYPES)) {
+      this.enemies.spawn(type, { x: spot.x + (i++ - 2) * 1.5, y: spot.y, z: spot.z }, { silent: true });
+    }
+    _tmp2.set(spot.x, spot.y + 1, spot.z);
+    this.projectiles.spawnPresent(_tmp2, _fwd, 'player');
+    // Every pooled effect has to be drawn at least once or its material is
+    // still uncompiled the first time a weapon uses it.
+    const up = { x: 0, y: 1, z: 0 };
+    this.fx.railBeam(cam.position, _tmp2);
+    this.fx.explosion(_tmp2, { scale: 1 });
+    this.fx.impact(_tmp2, up, { decal: true });
+    this.fx.frostBurst(_tmp2, up, {});
+    this.fx.crumbs(_tmp2, up, {});
+    this.fx.decal(_tmp2, up, 1, 0.5);
+    this.fx.gib(_tmp2, 6, 5, spot.y);
+    this.fx.tracer(cam.position, _tmp2);
+    this.fx.shell(_tmp2, {});
+    this.fx.update(1 / 60, cam.position);
+
+    this.view.warmup();
+    this.view.render(0);
+
+    for (const e of this.enemies.list) this.scene.remove(e.model);
+    this.enemies.list.length = 0;
+    this.projectiles.clear();
+    this.fx.clearTransient();
+  }
+
   loadLevel(index, onProgress = null) {
     this.unloadLevel();
     const def = LEVELS[index];
@@ -183,6 +243,8 @@ export class Game {
 
     this.respawnPlayer(true);
     this.weapons.resetForLevel();
+    onProgress?.(0.95, 'COMPILING SHADERS…');
+    this.warmupShaders();
     onProgress?.(1, 'READY');
     return built;
   }
@@ -668,13 +730,21 @@ export class Game {
       const dx = p.pos.x - pad.pos.x;
       const dz = p.pos.z - pad.pos.z;
       const dy = p.pos.y - pad.pos.y;
-      if (dx * dx + dz * dz < pad.radius * pad.radius && dy > -0.6 && dy < 1.6) {
+      if (dx * dx + dz * dz < pad.radius * pad.radius && dy > -1.0 && dy < 2.0) {
         if (pad._cool > 0) continue;
-        pad._cool = 0.35;
+        pad._cool = 0.3;
         p.vel.y = pad.push;
         if (pad.forward) {
-          p.vel.x += pad.forward.x;
-          p.vel.z += pad.forward.z;
+          // A targeted pad *sets* the horizontal velocity (Quake's trigger_push
+          // does the same) so the arc always lands where the level intends;
+          // air control still lets you steer once you are up there.
+          if (pad.target) {
+            p.vel.x = pad.forward.x;
+            p.vel.z = pad.forward.z;
+          } else {
+            p.vel.x += pad.forward.x;
+            p.vel.z += pad.forward.z;
+          }
         }
         p.onGround = false;
         p.lastGroundTime = -10;

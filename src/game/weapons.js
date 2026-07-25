@@ -153,14 +153,17 @@ export class ProjectileSystem {
     const mesh = this._presentMesh();
     mesh.position.copy(pos);
     this.scene.add(mesh);
-    const light = new THREE.PointLight(0xffb257, 3.2, 9, 2);
-    mesh.add(light);
-    this.list.push({
+    // Borrow a light from the fixed pool rather than creating one: adding a
+    // light to the scene changes three's light counts and recompiles every
+    // shader, which cost multiple seconds per rocket.
+    const proj = {
       kind: 'present', mesh, owner, def,
       vel: dir.clone().multiplyScalar(def.projectileSpeed),
       spin: new THREE.Vector3(Math.random() * 8 - 4, Math.random() * 8 - 4, 6),
       life: 0, maxLife: 6, radius: 0.16, gravity: 0,
-    });
+    };
+    this.ctx.fx.acquireProjLight(proj, 0xffb257, 3.2, 9);
+    this.list.push(proj);
     return mesh;
   }
 
@@ -233,6 +236,7 @@ export class ProjectileSystem {
       }
 
       p.mesh.position.copy(_end);
+      for (const l of fx.projLights) if (l.owner === p) l.light.position.copy(_end);
       p.mesh.rotation.x += p.spin.x * dt;
       p.mesh.rotation.y += p.spin.y * dt;
       p.mesh.rotation.z += p.spin.z * dt;
@@ -263,6 +267,7 @@ export class ProjectileSystem {
 
   _remove(i) {
     const p = this.list[i];
+    this.ctx.fx.releaseProjLight(p);
     this.scene.remove(p.mesh);
     this.list.splice(i, 1);
   }

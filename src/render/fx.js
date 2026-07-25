@@ -43,6 +43,7 @@ const MAX_DEBRIS = 120;
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _up = new THREE.Vector3(0, 1, 0);
+const _forwardZ = new THREE.Vector3(0, 0, 1);
 
 export class Fx {
   constructor(scene) {
@@ -122,11 +123,27 @@ export class Fx {
     scene.add(this.tracerMesh);
     this.tracers = [];
 
-    /* ---------- rail beams (tube meshes, richer than a line) ---------- */
+    /* ---------- rail beams (tube meshes, richer than a line) ----------
+     * Pooled rather than allocated per shot: a fresh material has to be
+     * compiled the first time it is drawn, which stalled the first rail shot.
+     */
     this.beams = [];
     this.beamGeo = new THREE.CylinderGeometry(0.035, 0.035, 1, 8, 1, true);
     this.beamGeo.translate(0, 0.5, 0);
     this.beamGeo.rotateX(Math.PI / 2); // aim down +Z
+    this.beamPool = [];
+    for (let i = 0; i < 6; i++) {
+      const m = new THREE.Mesh(this.beamGeo, new THREE.MeshBasicMaterial({
+        color: 0x9ff2d6, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthWrite: false, toneMapped: false,
+      }));
+      m.visible = false;
+      m.renderOrder = 12;
+      m.frustumCulled = false;
+      scene.add(m);
+      this.beamPool.push({ mesh: m, life: 0, maxLife: 1, active: false });
+    }
+    this.beamCursor = 0;
 
     /* ---------- decals ---------- */
     this.decals = [];
@@ -152,14 +169,13 @@ export class Fx {
     this.debrisCursor = 0;
     this.debrisReady = false;
 
-    /* ---------- flash lights ---------- */
+    /* ---------- flash lights ----------
+     * Borrowed from the View's fixed pool. Toggling a light's `visible` (or
+     * adding one) changes three's light counts and recompiles every shader in
+     * the scene, so these are only ever faded to intensity 0.
+     */
     this.flashes = [];
-    for (let i = 0; i < 5; i++) {
-      const l = new THREE.PointLight(0xffaa44, 0, 20, 2);
-      l.visible = false;
-      scene.add(l);
-      this.flashes.push({ light: l, life: 0, maxLife: 1, peak: 0 });
-    }
+    this.projLights = [];
     this.flashCursor = 0;
 
     /* ---------- shockwave shells ---------- */
@@ -179,6 +195,40 @@ export class Fx {
 
     /* ---------- snowfall ---------- */
     this.snow = null;
+  }
+
+  /**
+   * Hand the effects system its share of the renderer's fixed light pool.
+   * The first few become flash lights, the rest follow live projectiles.
+   */
+  useLights(lights) {
+    this.flashes = [];
+    this.projLights = [];
+    lights.forEach((l, i) => {
+      l.intensity = 0;
+      if (i < lights.length - 2) this.flashes.push({ light: l, life: 0, maxLife: 1, peak: 0 });
+      else this.projLights.push({ light: l, owner: null });
+    });
+    this.flashCursor = 0;
+  }
+
+  /** Borrow a light to follow a projectile. Returns null if all are busy. */
+  acquireProjLight(owner, color, intensity, distance) {
+    for (const p of this.projLights) {
+      if (p.owner) continue;
+      p.owner = owner;
+      p.light.color.set(color);
+      p.light.intensity = intensity;
+      p.light.distance = distance;
+      return p;
+    }
+    return null;
+  }
+
+  releaseProjLight(owner) {
+    for (const p of this.projLights) {
+      if (p.owner === owner) { p.owner = null; p.light.intensity = 0; }
+    }
   }
 
   /** Keep particle sizes resolution independent. */
@@ -373,18 +423,20 @@ export class Fx {
 
   /** Fat glowing rail beam with a spiral of frost particles along it. */
   railBeam(from, to, color = 0x9ff2d6, life = 0.55) {
-    const mesh = new THREE.Mesh(this.beamGeo, new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending,
-      depthWrite: false, toneMapped: false,
-    }));
+    const b = this.beamPool[this.beamCursor];
+    this.beamCursor = (this.beamCursor + 1) % this.beamPool.length;
+    const mesh = b.mesh;
     const dist = Math.hypot(to.x - from.x, to.y - from.y, to.z - from.z);
     mesh.position.set(from.x, from.y, from.z);
     _v.set(to.x - from.x, to.y - from.y, to.z - from.z).normalize();
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), _v);
+    mesh.quaternion.setFromUnitVectors(_forwardZ, _v);
     mesh.scale.set(1, 1, dist);
-    mesh.renderOrder = 12;
-    this.scene.add(mesh);
-    this.beams.push({ mesh, life: 0, maxLife: life });
+    mesh.material.color.set(color);
+    mesh.material.opacity = 0.9;
+    mesh.visible = true;
+    b.life = 0;
+    b.maxLife = life;
+    b.active = true;
 
     // Helix of frost motes along the beam.
     const steps = Math.min(46, Math.max(8, Math.floor(dist * 2.2)));
@@ -406,12 +458,12 @@ export class Fx {
   }
 
   flash(pos, { color = 0xffaa44, intensity = 12, life = 0.12, range = 14 } = {}) {
+    if (!this.flashes.length) return;
     const f = this.flashes[this.flashCursor];
     this.flashCursor = (this.flashCursor + 1) % this.flashes.length;
     f.light.color.set(color);
     f.light.distance = range;
     f.light.position.set(pos.x, pos.y, pos.z);
-    f.light.visible = true;
     f.life = 0;
     f.maxLife = life;
     f.peak = intensity;
@@ -575,16 +627,11 @@ export class Fx {
     tg.attributes.color.needsUpdate = true;
 
     /* beams */
-    for (let i = this.beams.length - 1; i >= 0; i--) {
-      const b = this.beams[i];
+    for (const b of this.beamPool) {
+      if (!b.active) continue;
       b.life += dt;
       const k = 1 - b.life / b.maxLife;
-      if (k <= 0) {
-        this.scene.remove(b.mesh);
-        b.mesh.material.dispose();
-        this.beams.splice(i, 1);
-        continue;
-      }
+      if (k <= 0) { b.active = false; b.mesh.visible = false; continue; }
       b.mesh.material.opacity = k * 0.9;
       const s = 0.35 + k * 0.9;
       b.mesh.scale.x = s;
@@ -626,11 +673,11 @@ export class Fx {
       if (fade > 0.8) d.mesh.scale.setScalar(Math.max(0.01, (1 - (fade - 0.8) / 0.2)));
     }
 
-    /* flashes */
+    /* flashes -- faded to zero, never hidden */
     for (const f of this.flashes) {
-      if (!f.light.visible) continue;
+      if (f.peak <= 0) continue;
       f.life += dt;
-      if (f.life >= f.maxLife) { f.light.visible = false; f.light.intensity = 0; continue; }
+      if (f.life >= f.maxLife) { f.light.intensity = 0; f.peak = 0; continue; }
       const k = 1 - f.life / f.maxLife;
       f.light.intensity = f.peak * k * k;
     }
@@ -651,12 +698,12 @@ export class Fx {
   clearTransient() {
     for (const p of this.particles) p.active = false;
     this.tracers.length = 0;
-    for (const b of this.beams) { this.scene.remove(b.mesh); b.mesh.material.dispose(); }
-    this.beams.length = 0;
+    for (const b of this.beamPool) { b.active = false; b.mesh.visible = false; }
     for (const d of this.decals) d.mesh.visible = false;
     this.decals.length = 0;
     for (const d of this.debris) { d.active = false; d.mesh.visible = false; }
-    for (const f of this.flashes) { f.light.visible = false; f.light.intensity = 0; }
+    for (const f of this.flashes) { f.light.intensity = 0; f.peak = 0; }
+    for (const p of this.projLights) { p.owner = null; p.light.intensity = 0; }
     for (const s of this.shells) s.mesh.visible = false;
   }
 }

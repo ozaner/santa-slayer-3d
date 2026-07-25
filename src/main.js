@@ -49,6 +49,7 @@ const input = {
 };
 
 const game = new Game({ view, fx, audio, hud, input });
+fx.useLights(view.fxLights);
 addEventListener('resize', () => fx.setViewportHeight(canvas.clientHeight || innerHeight));
 fx.setViewportHeight(canvas.clientHeight || innerHeight);
 
@@ -95,6 +96,12 @@ async function boot() {
   await nextFrame();
   // Warm the weapon viewmodels so the first weapon switch does not hitch.
   for (const id of ['chaingun', 'shotgun', 'launcher', 'rail']) game.weapons._model(id);
+
+  setLoading(0.45, 'PROOFING THE DOUGH…');
+  await nextFrame();
+  // Build every enemy prototype and the rocket now, not the first time one is
+  // needed mid-fight. Each involves canvas textures and a geometry merge.
+  game.prewarm();
 
   setLoading(0.55, 'LETTING IT SNOW…');
   await nextFrame();

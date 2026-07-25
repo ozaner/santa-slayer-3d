@@ -29,10 +29,31 @@ the circular object graph. Anything cloned at runtime (enemies, projectiles,
 pickups) must go through `cloneRig()` in `src/models/rig.js`, which names the
 parts, sanitises `userData`, and rebuilds the parts map on the copy.
 
+**Never change how many point lights are visible.** three.js bakes the light
+counts into every material's program cache key, so one light appearing or
+vanishing recompiles *every shader in the scene*. Measured: 376 ms for an
+explosion, **7.8 seconds** for a rocket that added its own light. `View` therefore
+allocates a fixed pool (`LEVEL_LIGHT_SLOTS + FX_LIGHT_SLOTS`) once, every light
+stays `visible: true` forever, and "off" means `intensity = 0`. Never call
+`scene.add(new PointLight(...))` during gameplay, never toggle `light.visible`,
+and if you need a light for an effect, borrow one via `fx.acquireProjLight()` or
+`fx.flash()`.
+
+Related: `Game.warmupShaders()` runs the real spawn and fire paths behind the
+loading screen and draws one composed frame, because `renderer.compile()` alone
+misses shadow-depth variants and pooled effect materials that have never been
+drawn.
+
 **Levels validate themselves.** `LevelBuilder.finish()` throws if any spawn
-point or pickup is inside a solid brush. Do not weaken this into a warning or a
-runtime nudge — a buried pickup is invisible in play but instantly obvious in the
-error. Fix the coordinate.
+point, pickup or jump pad is inside a solid brush. Do not weaken this into a
+warning or a runtime nudge — a buried pickup is invisible in play but instantly
+obvious in the error. Fix the coordinate.
+
+**Jump pads take a `target`, not a `push`.** The arc is solved so the player
+lands on the named point with `clearance` to spare. Hand-tuned pushes are how
+the first version flung players to 5.5 m at bridges whose decks were at 5.85 m.
+If a pad sits close to the platform it feeds, raise `clearance` — a shallow arc
+clips the platform's *edge* on the way up, which looks exactly like a dead pad.
 
 ## Layout
 
