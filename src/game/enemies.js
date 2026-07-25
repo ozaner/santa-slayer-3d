@@ -339,14 +339,18 @@ export class EnemyManager {
         // not collapse into a single conga line.
         e.strafeT -= dt;
         if (e.strafeT <= 0) { e.strafeT = 0.8 + Math.random() * 1.4; e.strafeDir *= -1; }
-        const inv = dist > 1e-4 ? 1 / dist : 0;
-        let dx = toPlayerX * inv, dz = toPlayerZ * inv;
-        const strafe = e.def.strafe ?? 0.18;
+
+        const goal = this._navGoal(e, dt, player, dist);
+        const gdx = goal.x - e.pos.x;
+        const gdz = goal.z - e.pos.z;
+        const glen = Math.hypot(gdx, gdz) || 1;
+        const dx = gdx / glen, dz = gdz / glen;
+        const strafe = goal.viaRoute ? 0 : (e.def.strafe ?? 0.18);
         wishX = dx - dz * strafe * e.strafeDir;
         wishZ = dz + dx * strafe * e.strafeDir;
 
         // Ranged types back off when the player closes in.
-        if (atk.kind === 'ranged' && dist < atk.minRange) { wishX = -dx; wishZ = -dz; }
+        if (atk.kind === 'ranged' && !goal.viaRoute && dist < atk.minRange) { wishX = -dx; wishZ = -dz; }
       }
     } else if (e.state === 'windup') {
       wantFace = true;
@@ -362,6 +366,25 @@ export class EnemyManager {
     } else if (e.state === 'recover') {
       e.attackAnim = 0;
       if (e.stateT >= atk.recover) { e.state = 'chase'; e.stateT = 0; }
+    }
+
+    /* ---- deadlock backstop ---- */
+    // Without a navmesh, a player parked on certain rooftops is genuinely
+    // unreachable, and a wave that can never end is far worse than any amount
+    // of AI jank. The timer resets on every near-miss, so an enemy actually
+    // engaging the player never trips it; one that has spent this long without
+    // ever getting close relocates near the player, and after a few failures
+    // crumbles so the wave can always complete.
+    e.contactT = (e.contactT ?? 0) + dt;
+    // True 3D distance: an enemy milling about directly *under* a rooftop is
+    // horizontally on top of the player but has never actually threatened them.
+    const contactDist = Math.hypot(toPlayerX, player.pos.y - e.pos.y, toPlayerZ);
+    if (contactDist < atk.range + 0.5) e.contactT = 0;
+    if (e.contactT > 25 && !e.def.boss) {
+      e.contactT = 0;
+      e.relocations = (e.relocations ?? 0) + 1;
+      if (e.relocations > 3) { this.kill(e, { starved: true }); return; }
+      this._relocateNear(e, player);
     }
 
     /* ---- boss extras ---- */
@@ -425,6 +448,11 @@ export class EnemyManager {
       if (e.vel.y < 0) e.vel.y = 0;
       vset(_centre, e.pos.x, e.pos.y + e.height / 2, e.pos.z);
     }
+
+    // Jump pads work for the gingerbread too. Without this, a player standing
+    // on any pad-only rooftop is untouchable and the wave never ends -- and a
+    // gingerbread man launched forty feet into the air is good television.
+    if (grounded) this._checkJumpPad(e);
 
     // Hop over small obstacles / up to the player when stuck.
     if (grounded && e.jumpCooldown <= 0 && e.state === 'chase') {
@@ -521,10 +549,124 @@ export class EnemyManager {
     }
   }
 
-  /** Cheap wall avoidance: probe left and right, steer away from the closer. */
+  /** Move a hopelessly stuck enemy to the spawn point nearest the player. */
+  _relocateNear(e, player) {
+    const spawns = this.ctx.game?.level?.enemySpawns;
+    if (!spawns?.length) return;
+    let best = null, bestD = Infinity;
+    for (const s of spawns) {
+      if (s.tag === 'boss') continue;
+      const d = Math.hypot(s.pos.x - player.pos.x, s.pos.z - player.pos.z)
+        + Math.abs(s.pos.y - player.pos.y) * 2;
+      if (d < bestD) { bestD = d; best = s; }
+    }
+    if (!best) return;
+    e.pos.x = best.pos.x; e.pos.y = best.pos.y; e.pos.z = best.pos.z;
+    e.vel.x = e.vel.y = e.vel.z = 0;
+    e._route = null;
+    e.stuckT = 0;
+    e._bestDist = undefined;
+    this._spawnFx(e);
+  }
+
+  _checkJumpPad(e) {
+    const pads = this.ctx.game?.level?.jumpPads;
+    if (!pads) return;
+    e._padCool = Math.max(0, (e._padCool ?? 0) - 0.016);
+    if (e._padCool > 0) return;
+    for (const pad of pads) {
+      const dx = e.pos.x - pad.pos.x;
+      const dz = e.pos.z - pad.pos.z;
+      const dy = e.pos.y - pad.pos.y;
+      if (dx * dx + dz * dz < pad.radius * pad.radius && dy > -0.6 && dy < 1.6) {
+        e.vel.y = pad.push;
+        e.onGround = false;
+        e._padCool = 0.5;
+        this.ctx.audio?.play('jumppad', pad.pos);
+        this.ctx.fx.flash(pad.pos, { color: 0x9ff2d6, intensity: 8, range: 8, life: 0.2 });
+        return;
+      }
+    }
+  }
+
+  /**
+   * Where this enemy should actually walk.
+   *
+   * Normally straight at the player. But when an enemy has stopped closing the
+   * distance and the player is well above it -- camping a rooftop or the
+   * watchtower -- it grinds against the wall below forever and the wave can
+   * never finish. In that case pick the level waypoint that minimises
+   * (distance to it + its distance to the player) and head there instead.
+   */
+  _navGoal(e, dt, player, dist) {
+    const dy = player.pos.y - e.pos.y;
+
+    // Progress means beating the closest we have ever got, not merely moving --
+    // a pack milling about below a rooftop wobbles in and out by a metre
+    // forever, which would reset a naive timer on every wobble. Only counted
+    // while the player is meaningfully above us, so ordinary chasing (and a
+    // player running away) is never mistaken for being stuck.
+    if (dy <= 1.5) {
+      e.stuckT = 0;
+      e._bestDist = dist;
+    } else if (e._bestDist === undefined || dist < e._bestDist - 0.35) {
+      e._bestDist = dist;
+      e.stuckT = 0;
+    } else {
+      e.stuckT = (e.stuckT ?? 0) + dt;
+    }
+
+    e._routeCooldown = Math.max(0, (e._routeCooldown ?? 0) - dt);
+
+    if (e._route) {
+      const rd = Math.hypot(e._route.x - e.pos.x, e._route.z - e.pos.z);
+      e._routeT -= dt;
+      if (rd < 2.0 || e._routeT <= 0 || dy < 1.2) {
+        e._route = null;
+        e.stuckT = 0;
+        e._bestDist = undefined;
+        // Commit to whatever the waypoint opened up (usually a staircase)
+        // before being allowed to reroute, or it oscillates on the spot.
+        e._routeCooldown = 3.5;
+      } else {
+        return { x: e._route.x, z: e._route.z, viaRoute: true };
+      }
+    }
+
+    if (e.stuckT > 2.5 && dy > 1.5 && e._routeCooldown <= 0) {
+      const points = this.ctx.game?.level?.routePoints;
+      if (points && points.length) {
+        let best = null, bestScore = Infinity;
+        for (const r of points) {
+          // Only waypoints this enemy can actually walk to from here. A
+          // waypoint at the top of the stairs is useless while standing at
+          // the bottom -- it has to go to the bottom one first.
+          if (Math.abs(r.y - e.pos.y) > 1.8) continue;
+          const toR = Math.hypot(r.x - e.pos.x, r.z - e.pos.z);
+          if (toR < 3) continue; // already here; it did not help
+          const rToP = Math.hypot(r.x - player.pos.x, r.z - player.pos.z)
+            + Math.abs(r.y - player.pos.y) * 1.5;
+          const score = toR + rToP;
+          if (score < bestScore) { bestScore = score; best = r; }
+        }
+        if (best) {
+          e._route = best;
+          e._routeT = 9;
+          return { x: best.x, z: best.z, viaRoute: true };
+        }
+      }
+      e.stuckT = 0;
+      e._routeCooldown = 2;
+    }
+    return { x: player.pos.x, z: player.pos.z, viaRoute: false };
+  }
+
+  /** Cheap wall avoidance: probe ahead, fan outward when blocked. */
   _avoidWalls(e, wx, wz, world) {
     const probe = 2.6;
-    const py = e.pos.y + e.height * 0.5;
+    // Probe just above the step height, not at mid-body: at mid-body every
+    // stair riser reads as a wall and the pack refuses to climb.
+    const py = e.pos.y + 0.72;
     let bestX = wx, bestZ = wz;
 
     vset(_pa, e.pos.x, py, e.pos.z);

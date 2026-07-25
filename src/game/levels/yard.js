@@ -28,10 +28,11 @@ export function buildYard(scene) {
   for (const [x, z, sx, sz] of [[0, -34, 96, 22], [0, 34, 96, 22], [-37, 0, 22, 48], [37, 0, 22, 48]]) {
     B.box(x, RY / 2, z, sx, RY, sz, { material: MAT.gingerWall, uvScale: 5 });
   }
-  B.stairs(0, -22, 9, 3.6, 6, 7, 'z', { material: MAT.wood, uvScale: 2 });
-  B.stairs(0, 16, 9, 3.6, 6, 7, 'z', { material: MAT.wood, uvScale: 2 });
-  B.stairs(-22, 0, 9, 3.6, 6, 7, 'x', { material: MAT.wood, uvScale: 2 });
-  B.stairs(16, 0, 9, 3.6, 6, 7, 'x', { material: MAT.wood, uvScale: 2 });
+  // All four ramps climb from the rink onto the ring and overlap its edge.
+  B.stairs([0, -17], [0, -23], 9, 3.4, 9, { material: MAT.wood, uvScale: 2 });
+  B.stairs([0, 17], [0, 23], 9, 3.4, 9, { material: MAT.wood, uvScale: 2 });
+  B.stairs([-20, 0], [-26, 0], 9, 3.4, 9, { material: MAT.wood, uvScale: 2 });
+  B.stairs([20, 0], [26, 0], 9, 3.4, 9, { material: MAT.wood, uvScale: 2 });
 
   // Perimeter cliffs
   const R = 55, H = 26;

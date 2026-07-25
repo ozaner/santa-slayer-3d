@@ -94,7 +94,8 @@ export function buildVillage(scene) {
   /* ---------------- the watchtower (rail spot) ---------------- */
   B.box(0, 3.5, -42, 14, 7, 10, { material: MAT.gingerWall, uvScale: 4 });
   B.box(0, 7.4, -42, 15.5, 0.8, 11.5, { material: MAT.wood, uvScale: 3 });
-  B.stairs(0, -34, 6, 7.8, 8, 14, 'z', { material: MAT.wood, uvScale: 2 });
+  // Rises toward the tower and overlaps the deck edge at z = -36.25.
+  B.stairs([0, -30], [0, -36.5], 6, 7.8, 18, { material: MAT.wood, uvScale: 2 });
   for (const s of [-1, 1]) {
     B.prop(buildToySoldier({ h: 3.4 }), s * 5.5, 7.8, -37.5, Math.PI);
   }

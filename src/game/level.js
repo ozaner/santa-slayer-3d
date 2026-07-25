@@ -13,6 +13,9 @@ import {
 } from '../render/materials.js';
 import { mergeProp, mergeSubtree, countDrawables } from '../render/optimize.js';
 
+/** Must stay below PM.stepHeight or the stairs are a wall. */
+const MAX_STEP_RISE = 0.46;
+
 /**
  * Box geometry whose UVs tile at a fixed world scale on every face, so a 40m
  * floor and a 2m crate show the same texture density.
@@ -52,6 +55,7 @@ export class LevelBuilder {
     this.lightAnchors = [];
     this.triggers = [];
     this.props = [];
+    this.routePoints = [];
     this.flagpole = null;
     this.killY = -45;
     this.bounds = { min: new THREE.Vector3(), max: new THREE.Vector3() };
@@ -102,18 +106,50 @@ export class LevelBuilder {
     this.world.addBox(cx, cy, cz, sx, sy, sz, surface);
   }
 
-  /** A staircase built from real steps, so the step-up code handles it. */
-  stairs(x, z, width, riseTotal, run, steps, dir = 'z', opts = {}) {
-    const stepRise = riseTotal / steps;
-    const stepRun = run / steps;
-    for (let i = 0; i < steps; i++) {
-      const h = stepRise * (i + 1);
-      if (dir === 'z') {
-        this.box(x, h / 2, z + stepRun * (i + 0.5), width, h, stepRun, { uvScale: 2, ...opts });
-      } else {
-        this.box(x + stepRun * (i + 0.5), h / 2, z, stepRun, h, width, { uvScale: 2, ...opts });
-      }
+  /**
+   * A staircase of real steps, so the movement code's step-up handles it.
+   *
+   * Takes explicit ground-level `from` and top-level `to` points as [x, z], because
+   * a direction flag is too easy to get backwards -- the first version of this
+   * built the watchtower stairs rising away from the tower, leaving the deck
+   * unreachable. Make `to` overlap the platform you are joining.
+   *
+   * Throws if the steps are taller than the player can walk up.
+   */
+  stairs(from, to, width, height, steps, opts = {}) {
+    const [x0, z0] = from;
+    const [x1, z1] = to;
+    const rise = height / steps;
+    if (rise > MAX_STEP_RISE) {
+      throw new Error(
+        `Staircase from (${x0}, ${z0}) to (${x1}, ${z1}) has ${rise.toFixed(2)}m steps, `
+        + `taller than the ${MAX_STEP_RISE}m the player can climb. Use more steps.`);
     }
+    const dx = (x1 - x0) / steps;
+    const dz = (z1 - z0) / steps;
+    const alongX = Math.abs(x1 - x0) > Math.abs(z1 - z0);
+    for (let i = 0; i < steps; i++) {
+      const h = rise * (i + 1);
+      this.box(
+        x0 + dx * (i + 0.5), h / 2, z0 + dz * (i + 0.5),
+        alongX ? Math.abs(dx) : width, h, alongX ? width : Math.abs(dz),
+        { uvScale: 2, ...opts },
+      );
+    }
+    // Register both ends as navigation waypoints. Deriving them from the
+    // staircase itself means they can never drift out of sync with it.
+    this.route(x0 - dx, 0, z0 - dz);
+    this.route(x1 + dx, height, z1 + dz);
+  }
+
+  /**
+   * A navigation waypoint. Enemies that stop making progress toward a player on
+   * higher ground head for the most promising one of these instead of grinding
+   * against a wall -- enough pathfinding to stop a wave deadlocking, without a
+   * navmesh.
+   */
+  route(x, y, z) {
+    this.routePoints.push({ x, y, z });
   }
 
   /** Attach a prop model; collects any light anchors it declares. */
@@ -158,6 +194,7 @@ export class LevelBuilder {
     this.jumpPads.push({
       pos: new THREE.Vector3(x, y, z), push, forward, radius,
     });
+    this.route(x, y, z);
     if (model) this.prop(model, x, y, z);
     return this.jumpPads[this.jumpPads.length - 1];
   }

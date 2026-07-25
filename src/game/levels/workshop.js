@@ -65,14 +65,15 @@ export function buildWorkshop(scene) {
   }
 
   // Stairs up to the catwalk, both ends.
-  B.stairs(-34, -18, 5, 7.4, 9, 15, 'z', { material: catMat, uvScale: 2 });
-  B.stairs(34, 4, 5, 7.4, 9, 15, 'z', { material: catMat, uvScale: 2 });
+  // Run into the catwalk ring's ends so the top step overlaps the walkway.
+  B.stairs([-40, -24], [-30, -24], 5, 7.45, 18, { material: catMat, uvScale: 2 });
+  B.stairs([40, 24], [30, 24], 5, 7.45, 18, { material: catMat, uvScale: 2 });
 
   /* ---------------- central assembly platform ---------------- */
   B.box(0, 1.6, 0, 20, 3.2, 14, { material: steel, uvScale: 3 });
   B.box(0, 3.4, 0, 21, 0.4, 15, { material: catMat, uvScale: 3 });
-  B.stairs(-13, -3, 6, 3.6, 5, 7, 'x', { material: catMat, uvScale: 2 });
-  B.stairs(13, -3, 6, 3.6, 5, 7, 'x', { material: catMat, uvScale: 2 });
+  B.stairs([-16, -3], [-10.5, -3], 6, 3.6, 9, { material: catMat, uvScale: 2 });
+  B.stairs([16, -3], [10.5, -3], 6, 3.6, 9, { material: catMat, uvScale: 2 });
   for (let i = 0; i < 3; i++) {
     const cv = buildConveyor({ len: 16 });
     B.prop(cv, 0, 3.6, -4 + i * 4);
@@ -122,8 +123,8 @@ export function buildWorkshop(scene) {
   B.setFlagpole(buildFlagpole(), 0, 3.8, 0);
 
   /* ---------------- spawns ---------------- */
-  B.spawn(-32, 0.2, -24, 0.9);
-  B.spawn(32, 0.2, 24, -2.3);
+  B.spawn(-24, 0.2, -14, 0.9);
+  B.spawn(24, 0.2, 14, -2.3);
   B.spawn(0, 4, 10, Math.PI);
   B.spawn(-32, 7.7, 20, 0.4);
 
