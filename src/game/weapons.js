@@ -127,7 +127,7 @@ export const VM = {
   frontZ: -0.78,      // z of the muzzle end
   right: 0.30,        // x of the weapon's centre (well clear of the crosshair)
   down: -0.155,       // y of the weapon's centre
-  yaw: 0.085,         // slight inward toe so it does not look bolted on
+  yaw: 0.15,          // toe inward so the barrel reads in silhouette
   pitch: -0.02,
 };
 

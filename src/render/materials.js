@@ -241,6 +241,25 @@ function hexStr(hex) {
   return '#' + hex.toString(16).padStart(6, '0');
 }
 
+const _writeC = new THREE.Color();
+
+/**
+ * Write a colour into ImageData bytes.
+ *
+ * `new THREE.Color(hex)` decodes sRGB into working (linear) space, and the
+ * canvas textures below are tagged SRGBColorSpace -- so writing the linear
+ * value straight out would gamma-decode it a second time and crush everything
+ * to near-black. Convert back on the way out.
+ */
+function putColor(data, i, c) {
+  _writeC.copy(c);
+  if (THREE.ColorManagement.enabled) _writeC.convertLinearToSRGB();
+  data[i] = Math.max(0, Math.min(255, _writeC.r * 255));
+  data[i + 1] = Math.max(0, Math.min(255, _writeC.g * 255));
+  data[i + 2] = Math.max(0, Math.min(255, _writeC.b * 255));
+  data[i + 3] = 255;
+}
+
 /** Mottled baked-dough colour + matching bumpy normal map. */
 export const TEX = {
   gingerbread(repeat = 1) {
@@ -261,11 +280,7 @@ export const TEX = {
             if (n < 0.45) c.lerp(dark, (0.45 - n) * 2.2);
             else c.lerp(light, (n - 0.45) * 1.6);
             c.multiplyScalar(0.86 + k * 0.28);
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);
@@ -292,11 +307,7 @@ export const TEX = {
             // fine woven ribbing
             const weave = 0.5 + 0.5 * Math.sin(x * 1.7) * Math.sin(y * 1.7);
             c.copy(base).multiplyScalar(0.82 + n * 0.3 + weave * 0.05);
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);
@@ -326,11 +337,7 @@ export const TEX = {
             c.multiplyScalar(0.94 + grain(x / s, y / s) * 0.12);
             // occasional ice crystal sparkle
             if (rnd() > 0.9985) c.setRGB(1, 1, 1);
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);
@@ -437,11 +444,7 @@ export const TEX = {
           for (let x = 0; x < s; x++) {
             const h = height(x, y);
             c.copy(base).multiplyScalar(0.45 + h * 0.8);
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);
@@ -476,11 +479,7 @@ export const TEX = {
             const h = height(x, y);
             if (h > 0.9) c.copy(ice);
             else c.copy(base).lerp(dark, 1 - dough(x / s, y / s));
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);
@@ -502,11 +501,7 @@ export const TEX = {
           for (let x = 0; x < s; x++) {
             const n = fbm(x / s, y / s);
             c.copy(base).multiplyScalar(0.85 + n * 0.3);
-            const i = (y * s + x) * 4;
-            img.data[i] = c.r * 255;
-            img.data[i + 1] = c.g * 255;
-            img.data[i + 2] = c.b * 255;
-            img.data[i + 3] = 255;
+            putColor(img.data, (y * s + x) * 4, c);
           }
         }
         ctx.putImageData(img, 0, 0);

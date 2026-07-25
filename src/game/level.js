@@ -11,6 +11,7 @@ import { World, SURFACE, v3, traceBox, makeTrace } from '../core/physics.js';
 import {
   MAT, PALETTE, glowMat, emissiveMat, stdMat, mesh, shadowize,
 } from '../render/materials.js';
+import { mergeProp, mergeSubtree, countDrawables } from '../render/optimize.js';
 
 /**
  * Box geometry whose UVs tile at a fixed world scale on every face, so a 40m
@@ -125,6 +126,8 @@ export class LevelBuilder {
     this.props.push(obj);
     const anchors = obj.userData?.lightAnchors;
     if (Array.isArray(anchors)) for (const a of anchors) this.lightAnchors.push(a);
+    // Props are built from dozens of primitives; bake the static ones down.
+    mergeProp(obj);
     return obj;
   }
 
@@ -172,6 +175,14 @@ export class LevelBuilder {
     this.bounds.min.set(b.min.x, b.min.y, b.min.z);
     this.bounds.max.set(b.max.x, b.max.y, b.max.z);
     shadowize(this.root, true, true);
+    // Batch the brush geometry too. Props were merged as they were added, so
+    // protect them (and the flagpole and light anchors) from being flattened.
+    const protect = new Set(this.props);
+    for (const a of this.lightAnchors) protect.add(a);
+    if (this.flagpole) protect.add(this.flagpole.model);
+    this.drawablesBefore = countDrawables(this.root);
+    mergeSubtree(this.root, protect);
+    this.drawables = countDrawables(this.root);
     this.validate();
     return this;
   }

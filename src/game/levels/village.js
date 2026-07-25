@@ -77,7 +77,7 @@ export function buildVillage(scene) {
   }
 
   // Rooftop bridges: candy-striped planks between neighbouring houses.
-  const bridgeMat = stdMat('vl_bridge', { ...TEX.wood(PALETTE.woodDark, 3, 3), roughness: 0.8 });
+  const bridgeMat = stdMat('vl_bridge', { ...TEX.wood(PALETTE.wood, 3, 3), roughness: 0.8 });
   const BY = 5.6;
   B.box(0, BY, -26, 40, 0.5, 3.4, { material: bridgeMat, uvScale: 3 });
   B.box(0, BY, 26, 40, 0.5, 3.4, { material: bridgeMat, uvScale: 3 });

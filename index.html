@@ -356,10 +356,18 @@
     transition: box-shadow .18s;
   }
 
+  /* Wide screens: menu panel to the left, hero Santa to the right. */
+  @media (min-width: 1040px) {
+    #menu { place-items: center start; }
+    #menu .panel { margin-left: 4vw; width: min(600px, 52vw); }
+    #menu .title { font-size: clamp(44px, 5.4vw, 82px); }
+  }
+
   @media (max-width: 720px) {
     .hud-corner .num { font-size: 38px; }
     #hud-left { left: 18px; } #hud-right { right: 18px; }
     .panel { padding: 26px 20px; }
+    #speedo { bottom: 92px; }
   }
 </style>
 </head>

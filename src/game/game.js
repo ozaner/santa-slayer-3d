@@ -149,6 +149,8 @@ export class Game {
       this.view.hemi.color.set(def.light.hemiSky ?? 0x8fbaff);
       this.view.hemi.groundColor.set(def.light.hemiGround ?? 0x2b3050);
       this.view.hemi.intensity = def.light.hemi ?? 0.55;
+      this.view.ambient.color.set(def.light.ambientColor ?? 0x46567f);
+      this.view.ambient.intensity = def.light.ambient ?? 0.55;
       this.view.moon.color.set(def.light.sunColor ?? 0xbfd4ff);
       this.view.moon.intensity = def.light.sun ?? 1.5;
       if (def.light.sunPos) this.view.moon.position.set(...def.light.sunPos);
@@ -336,9 +338,14 @@ export class Game {
       return;
     }
     if (this.waveState === 'fighting' && this.boss && !this.boss.alive) {
-      this.waveState = 'cleared';
+      this.waveState = 'dying';
+      this.waveTimer = 2.6;
       this.hud.centerMessage('THE GOLEM FALLS', '', '#ffd24a', 3000);
-      setTimeout(() => { if (this.state === 'playing') this.completeLevel(); }, 2600);
+    } else if (this.waveState === 'dying') {
+      // Driven by the game clock, not a wall-clock timer, so it stays in step
+      // with pausing and with the fixed simulation.
+      this.waveTimer -= dt;
+      if (this.waveTimer <= 0) this._allWavesCleared();
     }
     this.enemiesRemaining = this.enemies.aliveCount;
   }

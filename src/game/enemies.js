@@ -16,6 +16,7 @@ import {
   buildGrunt, buildSwordGB, buildShieldGB, buildSnowmanBrute, buildGingerGolem,
 } from '../models/gingerbread.js';
 import { cloneRig } from '../models/rig.js';
+import { mergeRig } from '../render/optimize.js';
 
 export const ENEMY_TYPES = {
   grunt: {
@@ -125,7 +126,13 @@ export class EnemyManager {
   }
 
   _proto(type) {
-    if (!this.protos[type]) this.protos[type] = ENEMY_TYPES[type].build();
+    if (!this.protos[type]) {
+      const model = ENEMY_TYPES[type].build();
+      // Bake the rigidly-attached primitives down before this becomes the
+      // template for every clone -- otherwise each enemy costs ~35 draw calls.
+      mergeRig(model);
+      this.protos[type] = model;
+    }
     return this.protos[type];
   }
 
@@ -274,6 +281,29 @@ export class EnemyManager {
       const e = this.list[i];
       if (!e.alive) { this.list.splice(i, 1); continue; }
       this._updateOne(e, dt, player, world);
+    }
+    this._updateShadowLod(dt, player);
+  }
+
+  /**
+   * Only the nearest handful of enemies cast shadows. Every shadow caster is a
+   * second draw call per mesh, and a gingerbread man twenty metres away
+   * contributes a few pixels of shadow nobody will ever look at.
+   */
+  _updateShadowLod(dt, player) {
+    this._lodT = (this._lodT ?? 0) - dt;
+    if (this._lodT > 0) return;
+    this._lodT = 0.25;
+
+    const sorted = this.list.filter((e) => e.alive);
+    sorted.sort((a, b) => vdistSq(a.pos, player.pos) - vdistSq(b.pos, player.pos));
+    const budget = this.shadowBudget ?? 10;
+    for (let i = 0; i < sorted.length; i++) {
+      const e = sorted[i];
+      const on = i < budget && vdistSq(e.pos, player.pos) < 40 * 40;
+      if (e._shadowOn === on) continue;
+      e._shadowOn = on;
+      e.model.traverse((o) => { if (o.isMesh) o.castShadow = on; });
     }
   }
 
@@ -568,7 +598,10 @@ export class EnemyManager {
 
     const swing = moving ? Math.sin(e.gaitPhase) : 0;
     const swing2 = moving ? Math.sin(e.gaitPhase * 2) : 0;
-    const amp = Math.min(1, speed / e.speed) * 0.85;
+    // Guard the divisor: a held-still enemy (speed 0) would otherwise make this
+    // 0/0, and a single NaN here propagates through matrixWorld and makes the
+    // entire model silently disappear.
+    const amp = Math.min(1, speed / Math.max(e.speed, 0.01)) * 0.85;
 
     if (!e.def.noLegs && p.legL && p.legR) {
       p.legL.rotation.x = swing * amp;

@@ -20,7 +20,7 @@ const ScreenFX = {
     uHurt: { value: 0 },
     uHeal: { value: 0 },
     uTime: { value: 0 },
-    uVignette: { value: 0.42 },
+    uVignette: { value: 0.3 },
     uAberration: { value: 0.0 },
   },
   vertexShader: /* glsl */`
@@ -93,8 +93,15 @@ export class View {
     this.baseFov = 90;
 
     /* --- lighting rig --- */
-    this.hemi = new THREE.HemisphereLight(0x8fbaff, 0x2b3050, 0.38);
+    // The ground colour is deliberately not black: it is the only thing
+    // lighting the underside of bridges, roofs and eaves at night.
+    this.hemi = new THREE.HemisphereLight(0x8fbaff, 0x4a5480, 0.8);
     this.scene.add(this.hemi);
+
+    // A floor on darkness. Without it, geometry that faces away from every
+    // light (bridge undersides, north walls) renders as flat black holes.
+    this.ambient = new THREE.AmbientLight(0x46567f, 0.55);
+    this.scene.add(this.ambient);
 
     this.moon = new THREE.DirectionalLight(0xbfd4ff, 1.15);
     this.moon.position.set(38, 60, -55);
@@ -109,7 +116,7 @@ export class View {
     this.scene.add(this.moon.target);
 
     // Warm bounce from the village lights, cheap and non-shadowing.
-    this.fill = new THREE.DirectionalLight(0xffa858, 0.22);
+    this.fill = new THREE.DirectionalLight(0xffa858, 0.4);
     this.fill.position.set(-30, 18, 40);
     this.scene.add(this.fill);
 
@@ -212,31 +219,44 @@ export class View {
     }
   }
 
-  setFov(deg) {
-    this.baseFov = deg;
-    this.camera.fov = deg;
-    this.camera.updateProjectionMatrix();
+  /**
+   * The FOV setting is HORIZONTAL, which is what players mean by "FOV 95".
+   * three.js wants vertical, so convert through the aspect ratio -- otherwise
+   * a wide monitor silently gets a fish-eye lens.
+   */
+  setFov(degHorizontal) {
+    this.baseFov = degHorizontal;
+    this._applyFov(this.baseFov + (this.fovBoost || 0));
   }
 
-  /** Speed-based FOV kick, Quake style. */
-  applyFovBoost(extra) {
-    const target = this.baseFov + extra;
-    if (Math.abs(this.camera.fov - target) > 0.01) {
-      this.camera.fov = target;
+  _applyFov(hFov) {
+    const aspect = this.camera.aspect || 1;
+    const vFov = 2 * Math.atan(Math.tan((hFov * Math.PI) / 360) / aspect) * (180 / Math.PI);
+    if (Math.abs(this.camera.fov - vFov) > 0.01) {
+      this.camera.fov = vFov;
       this.camera.updateProjectionMatrix();
     }
   }
 
+  /** Speed-based FOV kick, Quake style. */
+  applyFovBoost(extra) {
+    this.fovBoost = extra;
+    this._applyFov(this.baseFov + extra);
+  }
+
   resize() {
-    const w = this.canvas.clientWidth || innerWidth;
-    const h = this.canvas.clientHeight || innerHeight;
+    // A hidden or not-yet-laid-out canvas reports 0, which would give the
+    // camera an aspect of NaN and poison every matrix downstream.
+    const w = Math.max(1, this.canvas.clientWidth || innerWidth || 1280);
+    const h = Math.max(1, this.canvas.clientHeight || innerHeight || 720);
     this.renderer.setSize(w, h, false);
     this.composer.setSize(w, h);
     this.bloom.setSize(w, h);
     this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
     this.viewCamera.aspect = w / h;
     this.viewCamera.updateProjectionMatrix();
+    // Re-derive the vertical FOV for the new aspect.
+    this._applyFov(this.baseFov + (this.fovBoost || 0));
   }
 
   setHurt(v) { this.screenFx.uniforms.uHurt.value = v; }

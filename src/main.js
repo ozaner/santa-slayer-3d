@@ -118,12 +118,16 @@ async function boot() {
 let menuScene = null;
 let menuCamera = null;
 let menuSanta = null;
+const _menuSize = new THREE.Vector2();
 
 function buildMenuScene() {
   menuScene = new THREE.Scene();
+  // Framed as a character portrait: Santa fills the right third of a wide
+  // screen, leaving the left for the menu panel. On narrow screens the panel
+  // centres over him instead (see the media query in index.html).
   menuCamera = new THREE.PerspectiveCamera(38, 1, 0.1, 60);
-  menuCamera.position.set(0.6, 1.5, 4.4);
-  menuCamera.lookAt(0, 1.05, 0);
+  menuCamera.position.set(0.75, 1.5, 3.9);
+  menuCamera.lookAt(-1.05, 0.98, 0);
 
   menuSanta = cloneRig(buildSanta());
   menuSanta.position.set(0, 0, 0);
@@ -165,9 +169,10 @@ function renderMenu(t, dt) {
   if (parts.armL) parts.armL.rotation.x = -0.1 + Math.sin(t * 0.75 + 1.2) * 0.07;
   if (parts.hat) parts.hat.rotation.z = Math.sin(t * 1.1) * 0.05;
 
-  const w = canvas.clientWidth || innerWidth;
-  const h = canvas.clientHeight || innerHeight;
-  menuCamera.aspect = w / h;
+  // Take the aspect from the renderer's own drawing buffer -- the DOM size can
+  // be 0 while the canvas is offscreen, which would make this NaN.
+  view.renderer.getSize(_menuSize);
+  menuCamera.aspect = Math.max(0.1, _menuSize.x) / Math.max(0.1, _menuSize.y);
   menuCamera.updateProjectionMatrix();
 
   const r = view.renderer;

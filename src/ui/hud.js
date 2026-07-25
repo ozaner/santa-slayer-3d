@@ -114,13 +114,16 @@ export class Hud {
       this._set('wsub', this.el.waveSub, '');
     } else {
       this._set('wl', this.el.waveLabel, 'WAVE');
-      this._set('wi', this.el.waveInfo, `${g.wave} / ${g.totalWaves}`);
+      // Before the first wave spawns g.wave is still 0; show the upcoming one.
+      this._set('wi', this.el.waveInfo, `${Math.max(1, g.wave)} / ${g.totalWaves}`);
       this._set('wsub', this.el.waveSub,
-        g.waveState === 'break'
-          ? `Next wave in ${Math.ceil(g.waveTimer)}…`
-          : g.waveState === 'cleared'
-            ? 'REACH THE FLAGPOLE'
-            : `Gingerbread remaining: ${g.enemiesRemaining}`);
+        g.waveState === 'idle'
+          ? 'Get ready…'
+          : g.waveState === 'break'
+            ? `Next wave in ${Math.ceil(g.waveTimer)}…`
+            : g.waveState === 'cleared'
+              ? 'REACH THE FLAGPOLE'
+              : `Gingerbread remaining: ${g.enemiesRemaining}`);
     }
 
     this._set('sc', this.el.score, g.score.toLocaleString());
