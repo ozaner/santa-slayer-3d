@@ -556,7 +556,10 @@ window.SS = {
   sim(n = 60, dt = 1 / 60) {
     for (let i = 0; i < n; i++) game.update(dt);
   },
-  /** Capture the canvas to /shots/<name>.png via the dev-server endpoint. */
+  /**
+   * Capture the canvas to /shots/<name>.png. Dev only -- the endpoint lives in
+   * vite.config.js and is deliberately absent from a production build.
+   */
   async shot(name) {
     tick(1 / 60, performance.now() / 1000); // render fresh in this same task
     const data = canvas.toDataURL('image/png');
@@ -565,6 +568,10 @@ window.SS = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, data }),
     });
+    if (!res.ok || !res.headers.get('content-type')?.includes('json')) {
+      throw new Error('SS.shot() needs the dev server (npm run dev); the capture '
+        + 'endpoint is not built into production.');
+    }
     return res.json();
   },
 };
